@@ -34,16 +34,13 @@ import zipfile
 
 import utils
 
-X20_BASE_LOCATION = '/google/data/ro/teams/android-pgo-data'
+from android_build_client import AndroidBuildClient
 
 class Benchmark(object):
     def __init__(self, name):
         self.name = name
 
-    def x20_profile_location(self):
-        raise NotImplementedError()
-
-    def apct_job_name(self):
+    def apct_test_tag(self):
         raise NotImplementedError()
 
     def profdata_file(self, suffix=''):
@@ -61,11 +58,8 @@ class Benchmark(object):
 
 
 class NativeExeBenchmark(Benchmark):
-    def apct_job_name(self):
-        return 'pgo-collector'
-
-    def x20_profile_location(self):
-        return os.path.join(X20_BASE_LOCATION, 'raw')
+    def apct_test_tag(self):
+        return 'apct/perf/pgo/profile-collector'
 
     def profraw_files(self, profile_dir):
         if self.name == 'hwui':
@@ -77,11 +71,8 @@ class NativeExeBenchmark(Benchmark):
 
 
 class APKBenchmark(Benchmark):
-    def apct_job_name(self):
-        return 'apk-pgo-collector'
-
-    def x20_profile_location(self):
-        return os.path.join(X20_BASE_LOCATION, 'apk-raw')
+    def apct_test_tag(self):
+        return 'apct/perf/pgo/apk-profile-collector'
 
     def profdata_file(self, suffix=''):
         profdata = os.path.join('art', '{}_arm_arm64.profdata'.format(self.name))
@@ -102,30 +93,10 @@ def BenchmarkFactory(benchmark_name):
         raise RuntimeError('Unknown benchmark ' + benchmark_name)
 
 
-def extract_profiles(benchmark, branch, build, output_dir):
-    # The APCT results are stored in
-    #   <x20_profile_base>/<branch>/<build>/<apct_job_name>/<arbitrary_invocation_dir>/
-    #
-    # The PGO files are in _data_local_tmp_<id>.zip in the above directory.
+def extract_profiles(build, test_tag, build_client, output_dir):
+    pgo_zip = build_client.download_pgo_zip(build, test_tag, output_dir)
 
-    profile_base = os.path.join(benchmark.x20_profile_location(), branch, build,
-                                benchmark.apct_job_name())
-    invocation_dirs = os.listdir(profile_base)
-
-    if len(invocation_dirs) == 0:
-        raise RuntimeError('No invocations found in {}'.format(profile_base))
-    if len(invocation_dirs) > 1:
-        # TODO Add option to pick/select an invocation from the command line.
-        raise RuntimeError('More than one invocation found in {}'.format(profile_base))
-
-    profile_dir = os.path.join(profile_base, invocation_dirs[0])
-    zipfiles = [f for f in os.listdir(profile_dir) if f.startswith('_data_local_tmp')]
-
-    if len(zipfiles) != 1:
-        raise RuntimeError('Expected one zipfile in {}.  Found {}'.format(profile_dir,
-                                                                          len(zipfiles)))
-
-    zipfile_name = os.path.join(profile_dir, zipfiles[0])
+    zipfile_name = os.path.join(pgo_zip)
     zip_ref = zipfile.ZipFile(zipfile_name)
     zip_ref.extractall(output_dir)
     zip_ref.close()
@@ -156,10 +127,6 @@ def parse_args():
     parser.add_argument(
         '--profdata-suffix', type=str, default='',
         help='Suffix to append to merged profdata file')
-
-    parser.add_argument(
-        'branch', metavar='BRANCH',
-        help='Fetch profiles for BRANCH (e.g. git_qt-release)')
 
     parser.add_argument(
         'benchmark', metavar='BENCHMARK',
@@ -200,6 +167,8 @@ def main():
         branch_name = 'update-profiles-' + args.build
         utils.check_call(['repo', 'start', branch_name, '.'])
 
+    build_client = AndroidBuildClient()
+
     for benchmark_name in worklist:
         benchmark = BenchmarkFactory(benchmark_name)
 
@@ -210,16 +179,21 @@ def main():
         # expect to find one subdirectory with profraw files under the temporary
         # directory.
         extract_dir = tempfile.mkdtemp(prefix='pgo-profiles-'+benchmark_name)
-        extract_profiles(benchmark, args.branch, args.build, extract_dir)
+        extract_profiles(args.build, benchmark.apct_test_tag(), build_client,
+                         extract_dir)
 
-        if len(os.listdir(extract_dir)) != 1:
-            raise RuntimeError("Expected one subdir under {}".format(extract_dir))
-
-        extract_subdir = os.path.join(extract_dir, os.listdir(extract_dir)[0])
+        extract_subdirs = [
+            os.path.join(extract_dir, sub)
+            for sub in os.listdir(extract_dir)
+            if os.path.isdir(os.path.join(extract_dir, sub))
+        ]
+        if len(extract_subdirs) != 1:
+            raise RuntimeError(
+                "Expected one subdir under {}".format(extract_dir))
 
         # Merge profiles.
         profdata = benchmark.profdata_file(args.profdata_suffix)
-        benchmark.merge_profraws(extract_subdir, profdata)
+        benchmark.merge_profraws(extract_subdirs[0], profdata)
 
         # Construct 'git' commit message.
         message_lines = [
