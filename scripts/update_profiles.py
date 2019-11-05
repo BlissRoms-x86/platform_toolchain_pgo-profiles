@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 # Sample Usage:
-# $ python update_profiles.py 500000 git_master ALL --profdata-suffix 2019-04-15
+# $ python update_profiles.py 500000 ALL --profdata-suffix 2019-04-15
 #
 # Additional/frequently-used arguments:
 #   -b BUG adds a 'Bug: <BUG>' to the commit message when adding the profiles.
