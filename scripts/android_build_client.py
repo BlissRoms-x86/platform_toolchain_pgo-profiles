@@ -38,7 +38,7 @@ ANDROID_BUILD_API_VERSION = 'v2beta1'
 TRADEFED_KEY_FILE = '/google/data/ro/teams/tradefed/configs/tradefed.json'
 CHUNK_SIZE = 10 * 1024 * 1024  # 10M
 
-ANDROID_PGO_BUILD = 'pgo-taimen-config1'
+ANDROID_PGO_BUILD = 'pgo-coral-config1'
 
 
 class AndroidBuildClient(object):
